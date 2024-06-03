@@ -49,6 +49,8 @@ smoking_status_values = smoking_status_mapping[smoking_status]
 input_data = np.array([[age, avg_glucose_level, bmi]])
 scaled_data = scaler.transform(input_data)
 
+st.write('Scaled Data:', scaled_data)
+
 # Combine scaled data with other features
 input_features = np.array([[
     gender,

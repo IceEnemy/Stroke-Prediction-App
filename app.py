@@ -1,74 +1,126 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
-import joblib
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
 
-# Load the trained model and the scaler
-model = joblib.load('model.joblib')
-scaler = joblib.load('scaler.joblib')
+# Function to remove outliers using IQR
+def remove_outliers_iqr(df):
+    Q1 = df.quantile(0.25)
+    Q3 = df.quantile(0.75)
+    IQR = Q3 - Q1
+    mask = ~((df < (Q1 - 1.5 * IQR)) | (df > (Q3 + 1.5 * IQR))).any(axis=1)
+    return df[mask]
 
-# Create the input form
-st.title('Stroke Prediction')
-st.write('Fill in the details below to predict the likelihood of stroke.')
+# Load data
+df = pd.read_csv('healthcare-dataset-stroke-data.csv')
+df = df.drop(columns=['id'])
+df = df[df['gender'] != 'Other']
+df = df[df['work_type'] != 'Never_worked']
+df_numeric = df[['age','avg_glucose_level','bmi','stroke']]
 
-age = st.number_input('Age', min_value=0, max_value=100, value=50)
-avg_glucose_level = st.number_input('Average Glucose Level', min_value=0.0, step=0.1, value=100.0)
-bmi = st.number_input('BMI', min_value=0.0, step=0.1, value=25.0)
-gender = st.selectbox('Gender', options=['Female', 'Male'])
-ever_married = st.selectbox('Ever Married', options=['No', 'Yes'])
-Residence_type = st.selectbox('Residence Type', options=['Rural', 'Urban'])
-hypertension = st.selectbox('Hypertension', options=['No', 'Yes'])
-heart_disease = st.selectbox('Heart Disease', options=['No', 'Yes'])
-work_type = st.selectbox('Work Type', options=['Govt_job', 'Private', 'Self-employed', 'children'])
-smoking_status = st.selectbox('Smoking Status', options=['Unknown', 'formerly smoked', 'never smoked', 'smokes'])
+# Separate DataFrames for each 'stroke' group
+df_stroke_0 = df_numeric[df_numeric['stroke'] == 0]
+df_stroke_1 = df_numeric[df_numeric['stroke'] == 1]
 
-# Convert categorical inputs to numerical values
-gender = 1 if gender == 'Male' else 0
-ever_married = 1 if ever_married == 'Yes' else 0
-Residence_type = 1 if Residence_type == 'Urban' else 0
-hypertension = 1 if hypertension == 'Yes' else 0
-heart_disease = 1 if heart_disease == 'Yes' else 0
+# Remove outliers within each group
+df_stroke_0_no_outliers = remove_outliers_iqr(df_stroke_0)
+df_stroke_1_no_outliers = remove_outliers_iqr(df_stroke_1)
 
-work_type_mapping = {
-    'Govt_job': [1, 0, 0, 0],
-    'Private': [0, 1, 0, 0],
-    'Self-employed': [0, 0, 1, 0],
-    'children': [0, 0, 0, 1]
-}
+# Combine the DataFrames back together
+df_no_outliers = pd.concat([df_stroke_0_no_outliers, df_stroke_1_no_outliers])  
+df_combined = df.merge(df_no_outliers, on=['age', 'avg_glucose_level', 'bmi', 'stroke'], how='inner')
+df = df_combined
 
-smoking_status_mapping = {
-    'Unknown': [1, 0, 0, 0],
-    'formerly smoked': [0, 1, 0, 0],
-    'never smoked': [0, 0, 1, 0],
-    'smokes': [0, 0, 0, 1]
-}
+# Label encoding
+le = LabelEncoder()
+df['gender'] = le.fit_transform(df['gender'])
+df['ever_married'] = le.fit_transform(df['ever_married'])
+df['Residence_type'] = le.fit_transform(df['Residence_type'])
+df = pd.get_dummies(df, columns=['work_type','smoking_status'], dtype=int)
 
-work_type_values = work_type_mapping[work_type]
-smoking_status_values = smoking_status_mapping[smoking_status]
+# Scaling
+scaler = MinMaxScaler()
+df[['age','avg_glucose_level','bmi']] = scaler.fit_transform(df[['age','avg_glucose_level','bmi']])
 
-# Apply MinMax scaling to the input features
-input_data = np.array([[age, avg_glucose_level, bmi]])
-scaled_data = scaler.transform(input_data)
+# Impute missing BMI using linear regression
+train_data = df[df['bmi'].notnull()]  
+test_data = df[df['bmi'].isnull()]
+X_train_lr = train_data.drop(columns=['bmi','stroke'])
+y_train_lr = train_data['bmi']
+X_test_lr = test_data.drop(columns=['bmi','stroke'])
+model_lr = LinearRegression()
+model_lr.fit(X_train_lr, y_train_lr)
+y_pred_lr = model_lr.predict(X_test_lr)
+df.loc[df['bmi'].isnull(), 'bmi'] = y_pred_lr
 
-st.write('Scaled Data:', scaled_data)
+# Prepare data for logistic regression
+X = df.drop(columns=['stroke'])
+y = df['stroke']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+sm = SMOTE(random_state=42)
+X_train_res, y_train_res = sm.fit_resample(X_train, y_train)
 
-# Combine scaled data with other features
-input_features = np.array([[
-    gender,
-    scaled_data[0][0],  # Scaled age
-    hypertension,
-    heart_disease,
-    ever_married,
-    Residence_type,
-    scaled_data[0][1],  # Scaled avg_glucose_level
-    scaled_data[0][2],  # Scaled bmi
-    *work_type_values,
-    *smoking_status_values
-]])
+# Train logistic regression model
+classifier = LogisticRegression()
+classifier.fit(X_train_res, y_train_res)
 
-# Predict stroke
-prediction = model.predict(input_features)
+# Define the input form
+def user_input_features():
+    gender = st.selectbox('Gender', ('Male', 'Female'))
+    age = st.slider('Age', 0, 100, 50)
+    hypertension = st.selectbox('Hypertension', (0, 1))
+    heart_disease = st.selectbox('Heart Disease', (0, 1))
+    ever_married = st.selectbox('Ever Married', ('Yes', 'No'))
+    work_type = st.selectbox('Work Type', ('Private', 'Self-employed', 'Govt_job', 'children'))
+    residence_type = st.selectbox('Residence Type', ('Urban', 'Rural'))
+    avg_glucose_level = st.slider('Average Glucose Level', 0.0, 300.0, 100.0)
+    smoking_status = st.selectbox('Smoking Status', ('formerly smoked', 'never smoked', 'smokes'))
+    bmi = st.slider('BMI', 0.0, 60.0, 25.0)
 
-# Display prediction
-if st.button('Predict'):
-    result = 'Stroke' if prediction[0] == 1 else 'No Stroke'
-    st.write(f'Prediction: {result}')
+    data = {'gender': gender,
+            'age': age,
+            'hypertension': hypertension,
+            'heart_disease': heart_disease,
+            'ever_married': ever_married,
+            'work_type': work_type,
+            'Residence_type': residence_type,
+            'avg_glucose_level': avg_glucose_level,
+            'smoking_status': smoking_status,
+            'bmi': bmi}
+    features = pd.DataFrame(data, index=[0])
+    return features
+
+# User input
+input_df = user_input_features()
+
+# Encode and scale input data
+input_df['gender'] = le.transform(input_df['gender'])
+input_df['ever_married'] = le.transform(input_df['ever_married'])
+input_df['Residence_type'] = le.transform(input_df['Residence_type'])
+input_df = pd.get_dummies(input_df, columns=['work_type','smoking_status'], dtype=int)
+
+# Align the input_df to have the same columns as the training data
+required_columns = X_train.columns  # Align columns
+input_df = input_df.reindex(columns=required_columns, fill_value=0)
+
+# Scale the input data
+input_df[['age', 'avg_glucose_level', 'bmi']] = scaler.transform(input_df[['age', 'avg_glucose_level', 'bmi']])
+
+# Prediction
+prediction = classifier.predict(input_df)
+prediction_proba = classifier.predict_proba(input_df)
+
+st.subheader('Prediction')
+stroke = np.array(['No Stroke', 'Stroke'])
+st.write(stroke[prediction][0])
+
+st.subheader('Prediction Probability')
+st.write(prediction_proba)
+
+# Main function to run the Streamlit app
+if __name__ == '__main__':
+    st.title('Stroke Prediction App')
+    st.write('This app predicts the likelihood of a stroke based on user input.')

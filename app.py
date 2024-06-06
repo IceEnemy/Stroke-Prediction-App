@@ -9,6 +9,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
 
+
+if __name__ == '__main__':
+    st.title('Stroke Prediction App')
+    st.write('This app predicts the likelihood of a stroke based on user input.')
+
 # Load data
 df = pd.read_csv('healthcare-dataset-stroke-data.csv')
 df = df.drop(columns=['id'])
@@ -79,15 +84,15 @@ classifier.fit(X_train_res, y_train_res)
 # Define the input form
 def user_input_features():
     gender = st.selectbox('Gender', ('Male', 'Female'))
-    age = st.number_input('Age', min_value=0, max_value=100, value=50)
+    age = st.number_input('Age', min_value=0, value=50)
     hypertension = st.selectbox('Hypertension', ('Yes', 'No'))
     heart_disease = st.selectbox('Heart Disease', ('Yes', 'No'))
     ever_married = st.selectbox('Ever Married', ('Yes', 'No'))
     work_type = st.selectbox('Work Type', ('Private', 'Self-employed', 'Govt_job', 'children'))
     residence_type = st.selectbox('Residence Type', ('Urban', 'Rural'))
-    avg_glucose_level = st.number_input('Average Glucose Level', min_value=0.0, max_value=300.0, value=100.0)
+    avg_glucose_level = st.number_input('Average Glucose Level', min_value=0.0, value=100.0)
     smoking_status = st.selectbox('Smoking Status', ('formerly smoked', 'never smoked', 'smokes'))
-    bmi = st.number_input('BMI', min_value=0.0, max_value=60.0, value=25.0)
+    bmi = st.number_input('BMI', min_value=0.0, value=25.0)
 
     data = {'gender': gender,
             'age': age,
@@ -136,18 +141,3 @@ st.write(stroke[prediction][0])
 
 st.subheader('Prediction Probability')
 st.write(prediction_proba)
-
-# Display confusion matrix and classification report
-y_pred = classifier.predict(X_test)
-conf_matrix = confusion_matrix(y_test, y_pred)
-st.subheader('Confusion Matrix')
-fig, ax = plt.subplots()
-sns.heatmap(conf_matrix, annot=True, fmt="d", ax=ax)
-st.pyplot(fig)
-st.subheader('Classification Report')
-st.text(classification_report(y_test, y_pred))
-
-# Main function to run the Streamlit app
-if __name__ == '__main__':
-    st.title('Stroke Prediction App')
-    st.write('This app predicts the likelihood of a stroke based on user input.')
